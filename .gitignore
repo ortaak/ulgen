@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# Environment variables — ASLA commit'e girmesin
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+# .env.example dosyaları commite girer (şifresiz şablon)
+
+# Prisma generated client
+packages/database/node_modules/
+
+# TypeScript build cache
+*.tsbuildinfo
+apps/web/tsconfig.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+*.code-workspace
+
+# Claude Code
+.claude/
+
+# Turborepo cache
+.turbo/
+
+# Vercel
+.vercel/

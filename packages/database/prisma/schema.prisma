@@ -1,0 +1,311 @@
+// ÜLGEN - Prisma Schema
+// 
+// Bu dosya, veritabanı modellerini ve ilişkilerini tanımlar.
+// PostgreSQL veritabanı kullanılır.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// USER MODEL
+// ============================================================================
+// Kullanıcı modeli - Email/Password ve OAuth authentication destekler
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String?   // Hashed password (OAuth kullanıcıları için null)
+  image         String?
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  boards         Board[]         // Kullanıcının sahip olduğu board'lar
+  boardMembers   BoardMember[]   // Kullanıcının üyesi olduğu board'lar
+  cards          Card[]          @relation("CardAssignee")  // Atanmış kartlar
+  createdCards   Card[]          @relation("CardCreator")   // Oluşturduğu kartlar
+  comments       Comment[]       // Kullanıcının yorumları
+  attachments    Attachment[]    // Kullanıcının yüklediği dosyalar
+  timelineTasks  TimelineTask[]  // Kullanıcının timeline görevleri
+
+  @@index([email])
+}
+
+// ============================================================================
+// BOARD MODEL
+// ============================================================================
+// Board (Pano) modeli - Trello board'larını temsil eder
+model Board {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  background  String?  // Renk kodu veya resim URL'i
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  ownerId       String
+  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  lists         List[]
+  members       BoardMember[]
+  timelineTasks TimelineTask[] // Bu board'dan timeline'a eklenen görevler
+  labels        Label[]        // Board'a ait etiketler
+
+  @@index([ownerId])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// BOARD MEMBER MODEL
+// ============================================================================
+// Board üyelik modeli - Kullanıcıların board'lara erişim yetkilerini yönetir
+// Roller: owner (sahip), admin (yönetici), member (üye)
+model BoardMember {
+  id        String   @id @default(cuid())
+  role      String   @default("member") // owner, admin, member
+  createdAt DateTime @default(now())
+
+  // Relations
+  boardId   String
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Bir kullanıcı bir board'a sadece bir kez üye olabilir
+  @@unique([boardId, userId])
+  @@index([boardId])
+  @@index([userId])
+}
+
+
+// ============================================================================
+// LIST MODEL
+// ============================================================================
+// List (Sütun) modeli - Board içindeki listeleri temsil eder
+// position alanı ile sıralama yapılır
+model List {
+  id        String   @id @default(cuid())
+  title     String
+  position  Int      // Sıralama için pozisyon değeri
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  boardId   String
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cards     Card[]
+
+  // Board içinde position'a göre sıralama için index
+  @@index([boardId, position])
+}
+
+// ============================================================================
+// CARD MODEL
+// ============================================================================
+// Card (Kart) modeli - List içindeki görevleri temsil eder
+// position ile liste içinde sıralama yapılır
+model Card {
+  id           String    @id @default(cuid())
+  title        String
+  description  String?
+  position     Int       // Liste içinde sıralama için pozisyon
+  dueDate            DateTime?
+  dueComplete        Boolean   @default(false) // Bitiş tarihi tamamlandı olarak işaretlendi mi?
+  isCompleted        Boolean   @default(false) // Board-level: kart tamamen bitti, artık planlanmayacak
+  eisenhowerQuadrant String?   // Eisenhower matrisi: "DO" | "PLAN" | "DELEGATE" | "DELETE"
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  // Relations
+  listId        String
+  list          List           @relation(fields: [listId], references: [id], onDelete: Cascade)
+  creatorId     String
+  creator       User           @relation("CardCreator", fields: [creatorId], references: [id])
+  assignees     User[]         @relation("CardAssignee")  // Karta atanan kullanıcılar
+  comments      Comment[]      // Karta ait yorumlar
+  attachments   Attachment[]   // Karta ait dosya ekleri
+  timelineTasks TimelineTask[] // Bu kart için oluşturulan timeline görevleri
+  checklists    Checklist[]    // Karta ait kontrol listeleri
+  labels        CardLabel[]    // Karta ait etiketler
+  blockingFor   CardDependency[] @relation("BlockingDependencies") // Bu kart diğerlerini blokluyor
+  blockedBy     CardDependency[] @relation("BlockedDependencies")  // Bu kart başkalarını bekliyor
+
+  // Liste içinde position'a göre sıralama için index
+  @@index([listId, position])
+  @@index([creatorId])
+}
+
+// ============================================================================
+// CARD DEPENDENCY MODEL
+// ============================================================================
+// "A tamamlanmadan B başlamasın" ilişkisi
+// blockingCard tamamlanmadan blockedCard başlayamaz
+model CardDependency {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+
+  // Relations
+  blockingCardId String
+  blockingCard   Card     @relation("BlockingDependencies", fields: [blockingCardId], references: [id], onDelete: Cascade)
+  blockedCardId  String
+  blockedCard    Card     @relation("BlockedDependencies",  fields: [blockedCardId],  references: [id], onDelete: Cascade)
+
+  // Aynı ikili arasında tek bağımlılık olabilir
+  @@unique([blockingCardId, blockedCardId])
+  @@index([blockingCardId])
+  @@index([blockedCardId])
+}
+
+// ============================================================================
+// COMMENT MODEL
+// ============================================================================
+// Comment (Yorum) modeli - Kartlara yapılan yorumları temsil eder
+model Comment {
+  id        String   @id @default(cuid())
+  content   String   @db.Text // Uzun metinler için Text tipi
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  cardId    String
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  // Performans için index'ler
+  @@index([cardId, createdAt]) // Karta göre yorumları tarih sırasıyla getirmek için
+  @@index([authorId])
+}
+
+// ============================================================================
+// ATTACHMENT MODEL
+// ============================================================================
+// Attachment (Dosya Eki) modeli - Kartlara yüklenen dosyaları temsil eder
+// Dosya storage için UploadThing CDN kullanılır
+model Attachment {
+  id        String   @id @default(cuid())
+  name      String   // Orijinal dosya adı (gösterim için)
+  url       String   // UploadThing CDN URL'i (indirme/önizleme için)
+  key       String   @unique // UploadThing file key (silme işlemi için gerekli)
+  mimeType  String   // MIME tipi: image/jpeg, application/pdf, vb.
+  size      Int      // Dosya boyutu (byte cinsinden)
+  createdAt DateTime @default(now())
+
+  // Relations
+  cardId    String
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  // Karta göre ekleri tarih sırasıyla getirmek için index
+  @@index([cardId, createdAt])
+  @@index([userId])
+}
+
+// ============================================================================
+// CHECKLIST MODELS
+// ============================================================================
+// Checklist (Kontrol Listesi) - Karta ait görev listesi
+model Checklist {
+  id        String          @id @default(cuid())
+  name      String          // Kontrol listesinin adı
+  position  Int             // Sıralama için pozisyon
+  createdAt DateTime        @default(now())
+
+  // Relations
+  cardId    String
+  card      Card            @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  items     ChecklistItem[]
+
+  @@index([cardId, position])
+}
+
+// ChecklistItem (Kontrol Listesi Öğesi) - Checklist içindeki her bir madde
+model ChecklistItem {
+  id          String    @id @default(cuid())
+  name        String    // Öğenin adı
+  checked     Boolean   @default(false) // Tamamlandı mı?
+  position    Int       // Sıralama için pozisyon
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  checklistId String
+  checklist   Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@index([checklistId, position])
+}
+
+// ============================================================================
+// LABEL MODELS
+// ============================================================================
+// Label (Etiket) — Board seviyesinde tanımlanan, kartlara uygulanabilen etiketler
+
+model Label {
+  id      String      @id @default(cuid())
+  name    String      // Etiket adı (örn: "Acil", "Bug", "Feature")
+  color   String      // Renk kodu (örn: "red", "blue", "green")
+  boardId String
+  board   Board       @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cards   CardLabel[]
+
+  @@index([boardId])
+}
+
+// CardLabel — Kart-Label many-to-many junction tablosu
+model CardLabel {
+  cardId  String
+  labelId String
+  card    Card   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  label   Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([cardId, labelId])
+  @@index([cardId])
+  @@index([labelId])
+}
+
+// ============================================================================
+// TIMELINE MODELS
+// ============================================================================
+// Daily Task Timeline - Kullanıcının günlük görev planlaması için
+
+enum TimelineTaskStatus {
+  PLANNED      // Planlandı (varsayılan)
+  IN_PROGRESS  // Devam ediyor
+  PAUSED       // Duraklatıldı
+  COMPLETED    // Tamamlandı
+  SKIPPED      // Atlandı
+}
+
+// TimelineTask: Bir kartın belirli bir güne planlanmış versiyonu
+model TimelineTask {
+  id               String             @id @default(cuid())
+  scheduledDate    DateTime           // Hangi gün planlandı (saat 00:00)
+  startTime        DateTime           // Başlangıç saati (tam datetime)
+  endTime          DateTime           // Bitiş saati (tam datetime)
+  estimatedMinutes Int                @default(60) // Tahmini süre (dakika)
+  status           TimelineTaskStatus @default(PLANNED)
+  actualStartTime  DateTime?          // Gerçek başlangıç zamanı
+  actualEndTime    DateTime?          // Gerçek bitiş zamanı
+  actualMinutes    Int?               // Gerçekten harcanan dakika
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  // Relations
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardId  String
+  card    Card   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  boardId String
+  board   Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scheduledDate])
+  @@index([cardId])
+}

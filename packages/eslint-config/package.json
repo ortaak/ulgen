@@ -1,0 +1,12 @@
+{
+  "name": "eslint-config",
+  "version": "1.0.0",
+  "private": true,
+  "main": "next.js",
+  "files": [
+    "next.js"
+  ],
+  "dependencies": {
+    "eslint-config-next": "14.0.4"
+  }
+}
