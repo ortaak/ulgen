@@ -392,7 +392,7 @@ Bu proje özel lisans altındadır.
 
 ## 👥 İletişim
 
-Sorularınız için: [your-email@example.com]
+Sorularınız için: [hakan441413@gmail.com]
 
 ---
 
